@@ -3,363 +3,957 @@ using UnityEngine.XR.Interaction.Toolkit;
 using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.Interactables;
 using UnityEngine.XR.Content.Interaction;
+using TMPro;
 
-/// <summary>
-/// Controla un objeto (por ejemplo, un cubo que representa un robot)
-/// mediante los elementos UI 3D del paquete XRI:
-/// XR Lever, XR Joystick, XR Knob, XR Slider y un XR Socket con bateria.
-///
-/// Este script NO modifica los scripts originales del paquete.
-/// Solo escucha sus eventos y utiliza los valores recibidos para mover
-/// y rotar el robot.
-/// </summary>
 public class ControlRemotoRobot : MonoBehaviour
 {
-    [Header("OBJETO CONTROLADO")]
-    [Tooltip("Transform del cubo/robot que sera controlado.")]
+    // =========================================
+    // AVION
+    // =========================================
+
+    [Header("AVION")]
+    [Tooltip("Objeto principal del avion que sera controlado.")]
     [SerializeField] private Transform robot;
 
-    [Header("ELEMENTOS UI 3D")]
-    [Tooltip("XR Lever del control remoto.")]
+
+    // =========================================
+    // CONTROLES XR
+    // =========================================
+
+    [Header("CONTROLES XR")]
+
+    [Tooltip("Palanca de encendido.")]
     [SerializeField] private XRLever lever;
 
-    [Tooltip("XR Joystick del control remoto.")]
+    [Tooltip("Joystick para mover el avion.")]
     [SerializeField] private XRJoystick joystick;
 
-    [Tooltip("XR Knob del control remoto.")]
+    [Tooltip("Knob para controlar la rotacion.")]
     [SerializeField] private XRKnob knob;
 
-    [Tooltip("XR Slider del control remoto. Se utilizara para controlar la velocidad.")]
+    [Tooltip("Slider para controlar la velocidad.")]
     [SerializeField] private XRSlider slider;
 
+    [Tooltip("Segundo knob para controlar la altura.")]
+    [SerializeField] private XRKnob dialElevator;
+
+
+    // =========================================
+    // BATERIA / SOCKET
+    // =========================================
+
     [Header("BATERIA / SOCKET")]
-    [Tooltip("XR Socket Interactor donde se colocara la bateria.")]
+
+    [Tooltip("Socket donde se coloca la bateria.")]
     [SerializeField] private XRSocketInteractor batterySocket;
 
-    [Tooltip("Componente XRGrabInteractable de la bateria que debe entrar en el socket.")]
+    [Tooltip("Bateria que acepta el socket.")]
     [SerializeField] private XRBaseInteractable batteryToAccept;
 
+
+    // =========================================
+    // MOVIMIENTO
+    // =========================================
+
     [Header("MOVIMIENTO")]
-    [Tooltip("Velocidad minima del robot cuando el Slider esta en 0.")]
+
+    [Tooltip("Velocidad minima del avion.")]
     [SerializeField] private float minSpeed = 0.5f;
 
-    [Tooltip("Velocidad maxima del robot cuando el Slider esta en 1.")]
+    [Tooltip("Velocidad maxima del avion.")]
     [SerializeField] private float maxSpeed = 5f;
 
+
+    // =========================================
+    // ROTACION
+    // =========================================
+
     [Header("ROTACION")]
-    [Tooltip("Angulo maximo que puede girar el robot hacia cada lado.")]
+
+    [Tooltip("Angulo maximo de giro hacia cada lado.")]
     [SerializeField] private float maxRotationAngle = 90f;
 
-    // Valores recibidos desde los UI 3D
-    private Vector2 joystickValue = Vector2.zero;
-    private float knobValue = 0.5f;
-    private float sliderValue = 0.5f;
 
-    // Estado del sistema
+    // =========================================
+    // ELEVADOR
+    // =========================================
+
+    [Header("ELEVADOR / ALTURA")]
+
+    [Tooltip("Altura maxima que puede subir el avion desde su posicion inicial.")]
+    [SerializeField] private float alturaMaxima = 10f;
+
+    [Tooltip("Invierte la direccion del Dial Elevator.")]
+    [SerializeField] private bool invertirDialElevator = false;
+
+
+    // =========================================
+    // HELICE
+    // =========================================
+
+    [Header("HELICE")]
+
+    [Tooltip("Objeto independiente de la helice.")]
+    [SerializeField] private Transform helice;
+
+    [Tooltip("Velocidad maxima de giro de la helice.")]
+    [SerializeField] private float velocidadGiroHelice = 1500f;
+
+    [Tooltip("Eje local sobre el que gira la helice.")]
+    [SerializeField] private Vector3 ejeGiroHelice = Vector3.forward;
+
+
+    // =========================================
+    // TEXTOS
+    // =========================================
+
+    [Header("TEXTOS DE LOS CONTROLES")]
+
+    [Tooltip("Texto que muestra ON / OFF.")]
+    [SerializeField] private TMP_Text textoLever;
+
+    [Tooltip("Texto del joystick.")]
+    [SerializeField] private TMP_Text textoJoystick;
+
+    [Tooltip("Texto que muestra el angulo de rotacion.")]
+    [SerializeField] private TMP_Text textoRotacion;
+
+    [Tooltip("Texto que muestra la altura.")]
+    [SerializeField] private TMP_Text textoElevator;
+
+    [Tooltip("Texto que muestra la velocidad.")]
+    [SerializeField] private TMP_Text textoVelocidad;
+
+
+    // =========================================
+    // VALORES DE LOS CONTROLES
+    // =========================================
+
+    private Vector2 joystickValue = Vector2.zero;
+
+    private float knobValue = 0.5f;
+
+    private float sliderValue = 0f;
+
+    private float elevatorValue = 0f;
+
+
+    // =========================================
+    // ESTADO DEL SISTEMA
+    // =========================================
+
     private bool hasBattery = false;
+
     private bool leverActivated = false;
 
+
+    // =========================================
+    // MOVIMIENTO
+    // =========================================
+
     private float currentSpeed;
+
     private Quaternion initialRobotRotation;
 
-    // Offset (en espacio local del robot) entre el pivote del Transform
-    // y el centro visual real del modelo. Se usa para que el robot gire
-    // sobre si mismo en vez de describir una curva cuando el pivote del
-    // modelo no esta centrado.
     private Vector3 visualCenterLocalOffset = Vector3.zero;
+
+    private float initialAltitude;
+
+
+    // =========================================
+    // AWAKE
+    // =========================================
 
     private void Awake()
     {
-        // Evita valores invalidos en el Inspector.
         minSpeed = Mathf.Max(0f, minSpeed);
-        maxSpeed = Mathf.Max(minSpeed, maxSpeed);
 
-        currentSpeed = Mathf.Lerp(minSpeed, maxSpeed, 1f - sliderValue);
+        maxSpeed = Mathf.Max(
+            minSpeed,
+            maxSpeed
+        );
+
+        alturaMaxima = Mathf.Max(
+            0f,
+            alturaMaxima
+        );
+
+        currentSpeed = minSpeed;
     }
+
+
+    // =========================================
+    // START
+    // =========================================
 
     private void Start()
     {
-        // Guardamos la rotacion inicial del robot para que el Knob
-        // controle un rango fijo de -90 a +90 grados sin acumular vueltas.
+        // -----------------------------------------
+        // AVION
+        // -----------------------------------------
+
         if (robot != null)
         {
             initialRobotRotation = robot.rotation;
-            visualCenterLocalOffset = GetLocalCenterOffset(robot);
+
+            visualCenterLocalOffset =
+                GetLocalCenterOffset(robot);
+
+            // Guardar altura inicial
+            initialAltitude = robot.position.y;
         }
 
-        // Tomamos los valores iniciales de los componentes del paquete.
+
+        // -----------------------------------------
+        // JOYSTICK
+        // -----------------------------------------
+
         if (joystick != null)
         {
-            joystickValue = joystick.value;
+            joystickValue = new Vector2(
+                joystick.value.x,
+                joystick.value.y
+            );
         }
+
+
+        // -----------------------------------------
+        // KNOB ROTACION
+        // -----------------------------------------
 
         if (knob != null)
         {
             knobValue = knob.value;
         }
 
+
+        // -----------------------------------------
+        // SLIDER VELOCIDAD
+        // -----------------------------------------
+
         if (slider != null)
         {
-            sliderValue = slider.value;
-            UpdateSpeed(sliderValue);
+            sliderValue =
+                Mathf.Clamp01(slider.value);
         }
 
-        // El sistema comienza apagado hasta recibir la bateria.
+        UpdateSpeed(sliderValue);
+
+
+        // -----------------------------------------
+        // DIAL ELEVATOR
+        // -----------------------------------------
+
+        if (dialElevator != null)
+        {
+            elevatorValue =
+                Mathf.Clamp01(
+                    dialElevator.value
+                );
+        }
+
+
+        // -----------------------------------------
+        // BATERIA
+        // -----------------------------------------
+
         hasBattery = false;
-        leverActivated = false;
+
+        if (
+            batterySocket != null &&
+            batterySocket.hasSelection
+        )
+        {
+            if (
+                batteryToAccept == null ||
+                batterySocket.interactablesSelected.Contains(
+                    batteryToAccept
+                )
+            )
+            {
+                hasBattery = true;
+            }
+        }
+
+
+        // -----------------------------------------
+        // LEVER
+        // -----------------------------------------
+
+        if (lever != null)
+        {
+            // Detectar si ya estaba en ON
+            leverActivated = lever.value;
+        }
+        else
+        {
+            leverActivated = false;
+        }
+
+
+        // Actualizar textos al comenzar
+        ActualizarTextos();
     }
+
+
+    // =========================================
+    // ON ENABLE
+    // =========================================
 
     private void OnEnable()
     {
+        // -----------------------------------------
+        // LEVER
+        // -----------------------------------------
+
         if (lever != null)
         {
-            lever.onLeverActivate.AddListener(OnLeverActivate);
-            lever.onLeverDeactivate.AddListener(OnLeverDeactivate);
+            lever.onLeverActivate.AddListener(
+                OnLeverActivate
+            );
+
+            lever.onLeverDeactivate.AddListener(
+                OnLeverDeactivate
+            );
         }
+
+
+        // -----------------------------------------
+        // JOYSTICK
+        // -----------------------------------------
 
         if (joystick != null)
         {
-            joystick.onValueChangeX.AddListener(OnJoystickValueChangeX);
-            joystick.onValueChangeY.AddListener(OnJoystickValueChangeY);
+            joystick.onValueChangeX.AddListener(
+                OnJoystickValueChangeX
+            );
+
+            joystick.onValueChangeY.AddListener(
+                OnJoystickValueChangeY
+            );
         }
+
+
+        // -----------------------------------------
+        // KNOB ROTACION
+        // -----------------------------------------
 
         if (knob != null)
         {
-            knob.onValueChange.AddListener(OnKnobValueChange);
+            knob.onValueChange.AddListener(
+                OnKnobValueChange
+            );
         }
+
+
+        // -----------------------------------------
+        // SLIDER
+        // -----------------------------------------
 
         if (slider != null)
         {
-            slider.onValueChange.AddListener(OnSliderValueChange);
+            slider.onValueChange.AddListener(
+                OnSliderValueChange
+            );
         }
+
+
+        // -----------------------------------------
+        // DIAL ELEVATOR
+        // -----------------------------------------
+
+        if (dialElevator != null)
+        {
+            dialElevator.onValueChange.AddListener(
+                OnElevatorValueChange
+            );
+        }
+
+
+        // -----------------------------------------
+        // BATERIA
+        // -----------------------------------------
 
         if (batterySocket != null)
         {
-            batterySocket.selectEntered.AddListener(OnBatteryInserted);
-            batterySocket.selectExited.AddListener(OnBatteryRemoved);
+            batterySocket.selectEntered.AddListener(
+                OnBatteryInserted
+            );
+
+            batterySocket.selectExited.AddListener(
+                OnBatteryRemoved
+            );
         }
     }
+
+
+    // =========================================
+    // ON DISABLE
+    // =========================================
 
     private void OnDisable()
     {
+        // -----------------------------------------
+        // LEVER
+        // -----------------------------------------
+
         if (lever != null)
         {
-            lever.onLeverActivate.RemoveListener(OnLeverActivate);
-            lever.onLeverDeactivate.RemoveListener(OnLeverDeactivate);
+            lever.onLeverActivate.RemoveListener(
+                OnLeverActivate
+            );
+
+            lever.onLeverDeactivate.RemoveListener(
+                OnLeverDeactivate
+            );
         }
+
+
+        // -----------------------------------------
+        // JOYSTICK
+        // -----------------------------------------
 
         if (joystick != null)
         {
-            joystick.onValueChangeX.RemoveListener(OnJoystickValueChangeX);
-            joystick.onValueChangeY.RemoveListener(OnJoystickValueChangeY);
+            joystick.onValueChangeX.RemoveListener(
+                OnJoystickValueChangeX
+            );
+
+            joystick.onValueChangeY.RemoveListener(
+                OnJoystickValueChangeY
+            );
         }
+
+
+        // -----------------------------------------
+        // KNOB ROTACION
+        // -----------------------------------------
 
         if (knob != null)
         {
-            knob.onValueChange.RemoveListener(OnKnobValueChange);
+            knob.onValueChange.RemoveListener(
+                OnKnobValueChange
+            );
         }
+
+
+        // -----------------------------------------
+        // SLIDER
+        // -----------------------------------------
 
         if (slider != null)
         {
-            slider.onValueChange.RemoveListener(OnSliderValueChange);
+            slider.onValueChange.RemoveListener(
+                OnSliderValueChange
+            );
         }
+
+
+        // -----------------------------------------
+        // DIAL ELEVATOR
+        // -----------------------------------------
+
+        if (dialElevator != null)
+        {
+            dialElevator.onValueChange.RemoveListener(
+                OnElevatorValueChange
+            );
+        }
+
+
+        // -----------------------------------------
+        // BATERIA
+        // -----------------------------------------
 
         if (batterySocket != null)
         {
-            batterySocket.selectEntered.RemoveListener(OnBatteryInserted);
-            batterySocket.selectExited.RemoveListener(OnBatteryRemoved);
+            batterySocket.selectEntered.RemoveListener(
+                OnBatteryInserted
+            );
+
+            batterySocket.selectExited.RemoveListener(
+                OnBatteryRemoved
+            );
         }
     }
 
+
+    // =========================================
+    // UPDATE
+    // =========================================
+
     private void Update()
     {
-        if (!CanControlRobot() || robot == null)
-            return;
+        // Mantener actualizado el estado de la palanca
+        if (lever != null)
+        {
+            leverActivated = lever.value;
+        }
 
-        MoveRobot();
-        RotateRobot();
+
+        // -----------------------------------------
+        // CONTROLES
+        // -----------------------------------------
+
+        if (CanControlRobot())
+        {
+            // Girar helice
+            GirarHelice();
+
+            if (robot != null)
+            {
+                // Movimiento horizontal
+                MoveRobot();
+
+                // Rotacion
+                RotateRobot();
+
+                // Altura
+                MoveElevator();
+            }
+        }
+
+
+        // -----------------------------------------
+        // TEXTOS
+        // -----------------------------------------
+
+        ActualizarTextos();
     }
+
+
+    // =========================================
+    // ESTADO DEL SISTEMA
+    // =========================================
 
     private bool CanControlRobot()
     {
         return hasBattery && leverActivated;
     }
 
-    // Calcula el centro visual real del robot (bounds combinados de todos
-    // sus renderers) y lo devuelve como un offset en espacio LOCAL del
-    // Transform. Esto nos dice donde esta el "centro" del modelo aunque
-    // el pivote del Transform no este ahi.
-    private Vector3 GetLocalCenterOffset(Transform target)
+
+    // =========================================
+    // CENTRO VISUAL DEL AVION
+    // =========================================
+
+    private Vector3 GetLocalCenterOffset(
+        Transform target
+    )
     {
-        Renderer[] renderers = target.GetComponentsInChildren<Renderer>();
+        Renderer[] renderers =
+            target.GetComponentsInChildren<Renderer>();
+
         if (renderers.Length == 0)
             return Vector3.zero;
 
-        Bounds bounds = renderers[0].bounds;
+        Bounds bounds =
+            renderers[0].bounds;
+
         for (int i = 1; i < renderers.Length; i++)
         {
-            bounds.Encapsulate(renderers[i].bounds);
+            bounds.Encapsulate(
+                renderers[i].bounds
+            );
         }
 
-        return target.InverseTransformPoint(bounds.center);
+        return target.InverseTransformPoint(
+            bounds.center
+        );
     }
 
-    // =========================================================
+
+    // =========================================
     // LEVER
-    // =========================================================
+    // =========================================
 
     private void OnLeverActivate()
     {
         leverActivated = true;
     }
 
+
     private void OnLeverDeactivate()
     {
         leverActivated = false;
+
         joystickValue = Vector2.zero;
     }
 
-    // =========================================================
-    // JOYSTICK
-    // =========================================================
 
-    private void OnJoystickValueChangeX(float value)
+    // =========================================
+    // JOYSTICK
+    // =========================================
+
+    private void OnJoystickValueChangeX(
+        float value
+    )
     {
         joystickValue.x = value;
     }
 
-    private void OnJoystickValueChangeY(float value)
+
+    private void OnJoystickValueChangeY(
+        float value
+    )
     {
         joystickValue.y = value;
     }
 
+
+    // =========================================
+    // MOVIMIENTO HORIZONTAL
+    // =========================================
+
     private void MoveRobot()
     {
-        Vector3 movement = new Vector3(
-            joystickValue.x,
-            0f,
-            joystickValue.y
-        );
+        Vector3 movement =
+            new Vector3(
+                joystickValue.x,
+                0f,
+                joystickValue.y
+            );
 
-        robot.position += movement * currentSpeed * Time.deltaTime;
+        robot.position +=
+            movement *
+            currentSpeed *
+            Time.deltaTime;
     }
 
-    // =========================================================
-    // KNOB
-    // =========================================================
 
-    private void OnKnobValueChange(float value)
+    // =========================================
+    // KNOB DE ROTACION
+    // =========================================
+
+    private void OnKnobValueChange(
+        float value
+    )
     {
-        // Solo guardamos el valor aqui. La rotacion se aplica en Update()
-        // (ver RotateRobot), igual que el movimiento se aplica en MoveRobot().
-        // Asi, si el Knob se mueve antes de tener bateria/palanca activa,
-        // el giro correcto se aplica apenas el robot pueda ser controlado,
-        // en vez de perderse porque el evento ya paso.
-        knobValue = Mathf.Clamp01(value);
+        knobValue =
+            Mathf.Clamp01(value);
     }
+
 
     private void RotateRobot()
     {
-        // El valor del Knob se convierte directamente en un angulo:
-        // 0   = -90 grados
-        // 0.5 =   0 grados
-        // 1   = +90 grados
-        float angle = Mathf.Lerp(-maxRotationAngle, maxRotationAngle, knobValue);
+        float angle =
+            Mathf.Lerp(
+                -maxRotationAngle,
+                maxRotationAngle,
+                knobValue
+            );
 
-        Quaternion targetRotation = initialRobotRotation * Quaternion.Euler(0f, angle, 0f);
+        Quaternion targetRotation =
+            initialRobotRotation *
+            Quaternion.Euler(
+                0f,
+                angle,
+                0f
+            );
 
-        // Si el pivote del Transform no coincide con el centro visual del
-        // modelo, rotar solo con "robot.rotation = targetRotation" hace que
-        // el robot describa una curva/arco en vez de girar sobre si mismo.
-        // Por eso guardamos donde queda el centro visual ANTES de rotar, y
-        // despues movemos el robot lo justo para que ese centro se mantenga
-        // fijo en el mismo punto del mundo.
-        Vector3 visualCenterBefore = robot.TransformPoint(visualCenterLocalOffset);
+        Vector3 visualCenterBefore =
+            robot.TransformPoint(
+                visualCenterLocalOffset
+            );
 
-        robot.rotation = targetRotation;
+        robot.rotation =
+            targetRotation;
 
-        Vector3 visualCenterAfter = robot.TransformPoint(visualCenterLocalOffset);
-        robot.position += visualCenterBefore - visualCenterAfter;
+        Vector3 visualCenterAfter =
+            robot.TransformPoint(
+                visualCenterLocalOffset
+            );
+
+        robot.position +=
+            visualCenterBefore -
+            visualCenterAfter;
     }
 
-    // =========================================================
-    // SLIDER = VELOCIDAD
-    // =========================================================
 
-    private void OnSliderValueChange(float value)
+    // =========================================
+    // SLIDER DE VELOCIDAD
+    // =========================================
+
+    private void OnSliderValueChange(
+        float value
+    )
     {
-        sliderValue = Mathf.Clamp01(value);
+        sliderValue =
+            Mathf.Clamp01(value);
+
         UpdateSpeed(sliderValue);
     }
 
-    private void UpdateSpeed(float value)
-    {
-        // Se invierte el Slider para que:
-        // arriba (1) = velocidad maxima
-        // centro (0.5) = velocidad media
-        // abajo (0) = velocidad minima
-        float invertedValue = 1f - Mathf.Clamp01(value);
 
-        currentSpeed = Mathf.Lerp(minSpeed, maxSpeed, invertedValue);
+    private void UpdateSpeed(
+        float value
+    )
+    {
+        /*
+         * IMPORTANTE:
+         *
+         * En tu XRSlider:
+         *
+         * ARRIBA = value 0 = MAXIMA VELOCIDAD
+         * ABAJO  = value 1 = MINIMA VELOCIDAD
+         *
+         * Por eso invertimos el valor.
+         */
+
+        float invertedValue =
+            1f - Mathf.Clamp01(value);
+
+        currentSpeed =
+            Mathf.Lerp(
+                minSpeed,
+                maxSpeed,
+                invertedValue
+            );
     }
 
-    // =========================================================
-    // SOCKET / BATERIA
-    // =========================================================
 
-    private void OnBatteryInserted(SelectEnterEventArgs args)
+    // =========================================
+    // DIAL ELEVATOR
+    // =========================================
+
+    private void OnElevatorValueChange(
+        float value
+    )
     {
-        // Acepta unicamente la bateria que se haya asignado en el Inspector.
-        if (batteryToAccept == null)
-        {
-            // Para evitar que el proyecto falle si no se asigno la referencia,
-            // igualmente dejamos que el socket active el sistema.
-            hasBattery = true;
+        elevatorValue =
+            Mathf.Clamp01(value);
+    }
+
+
+    private void MoveElevator()
+    {
+        if (robot == null)
             return;
+
+        float value =
+            Mathf.Clamp01(elevatorValue);
+
+        // Invertir direccion si se desea
+        if (invertirDialElevator)
+        {
+            value = 1f - value;
         }
 
-        if (args.interactableObject == batteryToAccept)
+        /*
+         * 0%   = altura inicial
+         * 50%  = mitad de altura
+         * 100% = altura maxima
+         */
+
+        float targetAltitude =
+            initialAltitude +
+            (alturaMaxima * value);
+
+        Vector3 posicion =
+            robot.position;
+
+        posicion.y =
+            targetAltitude;
+
+        robot.position =
+            posicion;
+    }
+
+
+    // =========================================
+    // HELICE
+    // =========================================
+
+    private void GirarHelice()
+    {
+        if (helice == null)
+            return;
+
+        if (maxSpeed <= 0f)
+            return;
+
+        // La velocidad de giro depende
+        // de la velocidad del avion.
+
+        float factorVelocidad =
+            Mathf.Clamp01(
+                currentSpeed / maxSpeed
+            );
+
+        float velocidadGiro =
+            velocidadGiroHelice *
+            factorVelocidad;
+
+        helice.Rotate(
+            ejeGiroHelice.normalized,
+            velocidadGiro *
+            Time.deltaTime,
+            Space.Self
+        );
+    }
+
+
+    // =========================================
+    // BATERIA INSERTADA
+    // =========================================
+
+    private void OnBatteryInserted(
+        SelectEnterEventArgs args
+    )
+    {
+        if (
+            batteryToAccept == null ||
+            args.interactableObject ==
+            batteryToAccept
+        )
         {
             hasBattery = true;
+
+            // Revisar inmediatamente
+            // si el lever ya estaba en ON.
+
+            if (lever != null)
+            {
+                leverActivated =
+                    lever.value;
+            }
         }
     }
 
-    private void OnBatteryRemoved(SelectExitEventArgs args)
+
+    // =========================================
+    // BATERIA REMOVIDA
+    // =========================================
+
+    private void OnBatteryRemoved(
+        SelectExitEventArgs args
+    )
     {
-        if (batteryToAccept == null)
+        if (
+            batteryToAccept == null ||
+            args.interactableObject ==
+            batteryToAccept
+        )
         {
             hasBattery = false;
-            leverActivated = false;
-            return;
-        }
 
-        if (args.interactableObject == batteryToAccept)
-        {
-            hasBattery = false;
             leverActivated = false;
-            joystickValue = Vector2.zero;
+
+            joystickValue =
+                Vector2.zero;
         }
     }
 
-    // =========================================================
-    // METODOS PUBLICOS OPCIONALES
-    // =========================================================
 
-    /// <summary>
-    /// Permite activar manualmente el sistema desde otro script o evento.
-    /// </summary>
+    // =========================================
+    // TEXTOS
+    // =========================================
+
+    private void ActualizarTextos()
+    {
+        // -----------------------------------------
+        // LEVER
+        // -----------------------------------------
+
+        if (textoLever != null)
+        {
+            textoLever.text =
+                leverActivated
+                ? "ON"
+                : "OFF";
+        }
+
+
+        // -----------------------------------------
+        // JOYSTICK
+        // -----------------------------------------
+
+        if (textoJoystick != null)
+        {
+            textoJoystick.text =
+                "Movimiento";
+        }
+
+
+        // -----------------------------------------
+        // ROTACION
+        // -----------------------------------------
+
+        if (textoRotacion != null)
+        {
+            float angulo =
+                Mathf.Lerp(
+                    -maxRotationAngle,
+                    maxRotationAngle,
+                    knobValue
+                );
+
+            textoRotacion.text =
+                "Rotacion: " +
+                angulo.ToString("0") +
+                "°";
+        }
+
+
+        // -----------------------------------------
+        // ALTURA
+        // -----------------------------------------
+
+        if (
+            textoElevator != null &&
+            robot != null
+        )
+        {
+            float altura =
+                robot.position.y;
+
+            textoElevator.text =
+                "Altura: " +
+                altura.ToString("0.0") +
+                " mts";
+        }
+
+
+        // -----------------------------------------
+        // VELOCIDAD
+        // -----------------------------------------
+
+        if (textoVelocidad != null)
+        {
+            textoVelocidad.text =
+                "Velocidad: " +
+                currentSpeed.ToString("0.0") +
+                " s";
+        }
+    }
+
+
+    // =========================================
+    // ACTIVACION MANUAL
+    // =========================================
+
     public void ActivarControl()
     {
         hasBattery = true;
+
+        if (lever != null)
+        {
+            leverActivated =
+                lever.value;
+        }
     }
 
-    /// <summary>
-    /// Permite desactivar manualmente el sistema desde otro script o evento.
-    /// </summary>
+
+    // =========================================
+    // DESACTIVAR
+    // =========================================
+
     public void DesactivarControl()
     {
         hasBattery = false;
+
         leverActivated = false;
-        joystickValue = Vector2.zero;
+
+        joystickValue =
+            Vector2.zero;
     }
 }
